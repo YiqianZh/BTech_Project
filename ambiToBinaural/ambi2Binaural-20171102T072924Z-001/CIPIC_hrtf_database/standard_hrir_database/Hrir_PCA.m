@@ -1,0 +1,97 @@
+clc;clear;
+
+%{
+    Note : Set the Current Directory to Cipic Database where HRIRs of all subjects present
+    My Path : C:\Users\charishma\Downloads\CIPIC_hrtf_database\standard_hrir_database
+%}
+
+%% DATA PRE-PROCESSING
+% Step - 1: Loading Hrir Data
+files = dir('sub*'); % Structure of all files starting with 'sub' in a current directory 
+fileNames = {files.name}; % Array of all names of files
+numSubjects = length(fileNames); % number of subjects being considered
+signalLen = 200;
+
+% Step - 2: Read HRIR data for (0, 0) direction
+hrirData = zeros(signalLen, numSubjects);
+for i = 1 : numSubjects
+    subject = fileNames{i};             % fetch filename for subject i
+    load([subject '\hrir_final.mat']);  % Loading HRIR of particular Subject
+    hrir = hrir_l(13,8,:);              % Read data for (0, 0) direction
+    hrirData(:,i) = hrir(1,1,:);  % Every row of hrirData corresponds to hrir_l of each subject
+end
+
+% Step - 3: Trimming insignificant data
+% Considering only samples from 35 to 85, as samples 1 - 35 and 85 - 200
+% are insignificant as determined from hrirData plot
+lo = 35;
+hi = 85;
+trimmedHrirData = hrirData(lo:hi,:);
+numSamples = hi - lo + 1;
+
+% Step - 4: Data Normalization
+zeroMeanHrirData = trimmedHrirData - repmat(mean(trimmedHrirData, 2), 1, numSubjects);
+
+%% PRINCIPAL COMPONENT ANALYSIS
+% Step - 5: Co-Variance Matrix Calculation
+% Do Transpose because in zeroMeanHrirData row represents subject and column represents samples. We need samples as rows to find covariance 
+covarianceMatrix = cov(transpose(zeroMeanHrirData));
+
+% Step - 6: Eigen Vector calculation
+[V,eigenvalues] = eig(covarianceMatrix);  
+eigenvalues = diag(eigenvalues); % Diagonal Elements represent Eigen values
+
+% Step -7: Eigen Vector Calculation
+eigenThreshold = 0.0005; % Should be set to get a tolerable relative error
+principalVec = V(:,(eigenvalues > eigenThreshold)); % Considering only eigen vectors whose eigen values are greater than given threshold
+
+% Step - 8: Deriving New Representation
+newHrirData = transpose(principalVec) * zeroMeanHrirData;
+
+% Step - 9: Reconstruct original Dataset from new Dataset
+recostructedHrirData = principalVec * newHrirData;
+
+% Step -10: Relative Error Calculation
+relativeError = zeros(1,numSubjects);
+for i = 1:numSubjects
+    reconstructedDataVector = recostructedHrirData(:,i); 
+    originalDataVector = zeroMeanHrirData(:,i);
+    relativeError(:,i) = (norm(reconstructedDataVector - originalDataVector))/norm(originalDataVector); 
+end
+
+relativeErrorMax = max(relativeError);
+
+% Load Anthropometric Features Data
+load('anthor2.mat'); % Modified AnthropometricData within CIPICDatabase.Modification was,label encoding to age column(i.e.,Converting M/F to 1/0)
+
+% Getting Anthropometric Features Data
+anthroDataMatrix = horzcat(D,WeightKilograms,X,age,id,sex,theta); 
+anthroDataMatrix = transpose(anthroDataMatrix);
+
+
+% Calculation of Correlation Coeff between Features and newHrirData
+numFeatures = length(anthroDataMatrix(:,1));
+reducedDim = length(newHrirData(:,1));
+correlationMatrix = zeros(numFeatures, reducedDim);
+
+for i = 1 : numFeatures
+    for j = 1 : reducedDim
+        correlation = corrcoef(anthroDataMatrix(i,:),newHrirData(j,:),'rows','complete');
+        correlationMatrix(i,j) = correlation(1,2);
+    end
+end
+
+figure;
+surf(abs(correlationMatrix));
+
+figure;
+scatter(anthroDataMatrix(11,:), newHrirData(1,:));
+
+figure;
+scatter(anthroDataMatrix(17,:), newHrirData(6,:));
+
+figure;
+scatter(anthroDataMatrix(18,:), newHrirData(5,:));
+
+figure;
+scatter(anthroDataMatrix(19,:), newHrirData(19,:));
